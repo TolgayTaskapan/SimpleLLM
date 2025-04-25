@@ -1,7 +1,7 @@
 <div class="chat-container">
     <div id="chat-history" class="chat-history">
         <!-- Chat messages will be added here -->
-        <div class="message-container" *ngFor="let message of conversationHistory" [ngClass]="{'user-message': message.role === 'user', 'assistant-message': message.role === 'assistant'}">
+        <div class="message-container" *ngFor="let message of conversationHistory()" [ngClass]="{'user-message': message.role === 'user', 'assistant-message': message.role === 'assistant'}">
             <div class="message-bubble">
                 <ng-container *ngFor="let part of message.content">
                     <span *ngIf="part.type === 'text'" [innerHTML]="formatMarkdown(part.text)"></span>
@@ -18,19 +18,19 @@
         </div>
     </div>
     <div class="input-area">
-        <div *ngIf="uploadedImageData" class="image-preview-container">
-          <img [src]="uploadedImageData" alt="Selected image preview" class="image-preview">
+        <div *ngIf="uploadedImageData()" class="image-preview-container">
+          <img [src]="uploadedImageData()" alt="Selected image preview" class="image-preview">
           <button (click)="clearImage()">X</button>
         </div>
-        <button id="imageUploadBtn" class="upload-btn" title="Upload Image" *ngIf="modelCapabilities && modelSelector" [class.hidden]="!modelCapabilities[modelSelector].includes('image')" (click)="triggerImageFileInput()">🖼️</button>
-        <button id="audioUploadBtn" class="upload-btn" title="Upload Audio" *ngIf="modelCapabilities && modelSelector" [class.hidden]="!modelCapabilities[modelSelector].includes('audio')">🎤</button>
+        <button id="imageUploadBtn" class="upload-btn" title="Upload Image" *ngIf="modelCapabilities() && selectedModelIdInput()" [class.hidden]="!modelCapabilities()?.[selectedModelIdInput()]?.includes('image')" (click)="triggerImageFileInput()">🖼️</button>
+        <button id="audioUploadBtn" class="upload-btn" title="Upload Audio" *ngIf="modelCapabilities() && selectedModelIdInput()" [class.hidden]="!modelCapabilities()[selectedModelIdInput()].includes('audio')">🎤</button>
         <input type="text" id="prompt-input" placeholder="Enter your prompt..." [(ngModel)]="promptInput" (keydown)="onPromptKeydown($event)" (paste)="handlePaste($event)">
         <button id="submit-button" (click)="onSubmit()">Send</button>
         <button id="openSettingsPanelBtn" (click)="openSettingsPanel()">Settings</button>
     </div>
 </div>
 
-<div id="settingsPanel" class="settings-panel" [class.open]="settingsPanelOpen">
+<div id="settingsPanel" class="settings-panel" [class.open]="settingsPanelOpen()">
     <div class="settings-panel-header">
         <h2>Settings</h2>
         <button class="close-panel-btn" (click)="closeSettingsPanel()">&times;</button>
@@ -43,27 +43,27 @@
         <div class="setting-group">
             <label>Select Model:</label>
             <mat-form-field appearance="fill">
-                <mat-select [(ngModel)]="modelSelector" (selectionChange)="onModelSelectChange()">
-                    <mat-select-trigger *ngIf="selectedModelDetails">
-                        <div>{{ selectedModelDetails.name }}</div>
-                        <div>Context Length: {{ selectedModelDetails.context_length ?? 'N/A' }}</div>
-                        <div>Input Price: ${{ (selectedModelDetails.pricing?.prompt ?? 0) * 1000000 | formatCost }} / M tokens</div>
-                        <div>Output Price: ${{ (selectedModelDetails.pricing?.completion ?? 0) * 1000000 | formatCost }} / M tokens</div>
-                    </mat-select-trigger>
-                    <input matInput [formControl]="modelFilterCtrl" placeholder="Filter models" (keydown)="$event.stopPropagation()">
-                    <mat-option *ngFor="let model of filteredModels" [value]="model.id">
-                        <div>{{ model.name }}</div>
-                        <div>Context Length: {{ model.context_length ?? 'N/A' }}</div>
-                        <div>Input Price: ${{ (model.pricing?.prompt ?? 0) * 1000000 | formatCost }} / M tokens</div>
-                        <div>Output Price: ${{ (model.pricing?.completion ?? 0) * 1000000 | formatCost }} / M tokens</div>
-                    </mat-option>
+                <mat-select [(ngModel)]="selectedModelIdInput" (selectionChange)="onModelSelectionChange($event.value)">
+                  <mat-select-trigger *ngIf="selectedModelDetails()">
+                    <div>{{ selectedModelDetails()?.name }}</div>
+                    <div>Context Length: {{ selectedModelDetails()?.context_length ?? 'N/A' }}</div>
+                    <div>Input Price: ${{ getNumericPrice(selectedModelDetails()?.pricing?.prompt) * 1000000 | formatCost }} / M tokens</div>
+                    <div>Output Price: ${{ getNumericPrice(selectedModelDetails()?.pricing?.completion) * 1000000 | formatCost }} / M tokens</div>
+                  </mat-select-trigger>
+                  <input matInput [formControl]="modelFilterCtrl" placeholder="Filter models" (keydown)="$event.stopPropagation()">
+                  <mat-option *ngFor="let model of filteredModels()" [value]="model.id">
+                    <div>{{ model.name }}</div>
+                    <div>Context Length: {{ model.context_length ?? 'N/A' }}</div>
+                    <div>Input Price: ${{ getNumericPrice(model.pricing?.prompt) * 1000000 | formatCost }} / M tokens</div>
+                    <div>Output Price: ${{ getNumericPrice(model.pricing?.completion) * 1000000 | formatCost }} / M tokens</div>
+                  </mat-option>
                 </mat-select>
             </mat-form-field>
         </div>
         <div class="setting-group">
             <label for="sequentialThinkingToggle">Enable Sequential Thinking:</label>
-            <input type="checkbox" id="sequentialThinkingToggle" [(ngModel)]="sequentialThinkingEnabled" (change)="onSequentialThinkingToggleChange()">
-            <span class="status-indicator" [ngClass]="sequentialThinkingStatus">{{ sequentialThinkingStatus }}</span>
+            <input type="checkbox" id="sequentialThinkingToggle" [(ngModel)]="sequentialThinkingEnabledInput" (change)="onSequentialThinkingToggleChange($event)">
+            <span class="status-indicator" [ngClass]="sequentialThinkingStatus()">{{ sequentialThinkingStatus() }}</span>
         </div>
         <button id="saveSettingsButton" (click)="saveSettings()">Save Settings</button>
     </div>
