@@ -8,9 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
-from llama_cpp import Llama
 import uvicorn
-import torch
 
 app = FastAPI()
 
@@ -190,35 +188,8 @@ async def shutdown_event():
 # --- End MCP Sequential Thinking Integration ---
 
 
-# Load the GPTQ model
-repo_id = "mradermacher/DeepSeek-R1-Distill-Qwen-14B-Uncensored-GGUF"
-filename = "DeepSeek-R1-Distill-Qwen-14B-Uncensored.IQ4_XS.gguf"
-
-print(f"Loading model from repo: {repo_id} with filename {filename}...")
-# Check if CUDA is available and set device accordingly
-if torch.cuda.is_available():
-    print("CUDA is available. Using GPU.")
-    # You might need to specify the device explicitly if you have multiple GPUs
-    # device = torch.device("cuda:0")
-    # model = Llama.from_pretrained(..., device=device)
-else:
-    print("CUDA not available. Using CPU.")
-    # If using CPU, you might want to adjust n_gpu_layers
-    # n_gpu_layers = 0
-
-model = Llama.from_pretrained(
-    repo_id=repo_id,
-    filename=filename,
-    verbose=True,
-    n_gpu_layers=-1  # Offload all possible layers to GPU
-)
-print("Model loaded.")
-
-current_dir = os.path.dirname(os.path.abspath(__file__))
-
 class ChatRequest(BaseModel):
     prompt: str
-    mode: str
     apiKey: str = None
     modelId: str = None
     imageData: Optional[str] = None
@@ -244,7 +215,6 @@ class ModelInfo(BaseModel):
 async def chat_completion(request: ChatRequest):
     try:
         user_prompt = request.prompt
-        mode = request.mode
         api_key = request.apiKey
         model_id = request.modelId
         image_data = request.imageData
@@ -265,63 +235,44 @@ async def chat_completion(request: ChatRequest):
         # --- End MCP Sequential Thinking Integration ---
 
 
-        if mode == 'local':
-            print(f"Generating completion for prompt (local mode): {user_prompt}")
-            output = model.create_completion(
-                user_prompt,
-                max_tokens=8192,
-                temperature=0.7,
-                top_p=0.95,
-                top_k=40,
-                repeat_penalty=1.1,
-                stream=False
-            )
-            response_text = output["choices"][0]["text"]
-            print(f"Generated response (local mode): {response_text}")
-            response_payload = {"response": response_text}
+        if not api_key or not model_id:
+            raise HTTPException(status_code=400, detail="apiKey and modelId are required for openrouter mode")
 
-        elif mode == 'openrouter':
-            if not api_key or not model_id:
-                raise HTTPException(status_code=400, detail="apiKey and modelId are required for openrouter mode")
+        print(f"Generating completion for prompt: {user_prompt} with model {model_id}")
 
-            print(f"Generating completion for prompt (openrouter mode): {user_prompt} with model {model_id}")
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
 
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            }
-
-            # Construct messages payload based on whether image data is present
-            if image_data:
-                messages_payload = [
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": user_prompt},
-                            {"type": "image_url", "image_url": {"url": image_data}}
-                        ]
-                    }
-                ]
-            else:
-                messages_payload = [{"role": "user", "content": user_prompt}]
-
-            payload = {
-                "model": model_id,
-                "messages": messages_payload,
-                # Include other parameters like max_tokens, temperature if needed
-            }
-
-            response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
-            response.raise_for_status() # Raise an exception for bad status codes
-
-            response_data = response.json()
-            response_text = response_data['choices'][0]['message']['content']
-
-            print(f"Generated response (openrouter mode): {response_text}")
-            response_payload = {"response": response_text}
-
+        # Construct messages payload based on whether image data is present
+        if image_data:
+            messages_payload = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_prompt},
+                        {"type": "image_url", "image_url": {"url": image_data}}
+                    ]
+                }
+            ]
         else:
-            raise HTTPException(status_code=400, detail="Invalid mode specified. Use 'local' or 'openrouter'.")
+            messages_payload = [{"role": "user", "content": user_prompt}]
+
+        payload = {
+            "model": model_id,
+            "messages": messages_payload,
+            # Include other parameters like max_tokens, temperature if needed
+        }
+
+        response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
+        response.raise_for_status() # Raise an exception for bad status codes
+
+        response_data = response.json()
+        response_text = response_data['choices'][0]['message']['content']
+
+        print(f"Generated response: {response_text}")
+        response_payload = {"response": response_text}
 
         # --- MCP Sequential Thinking Integration ---
         if thinking_output:
