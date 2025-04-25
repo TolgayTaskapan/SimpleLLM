@@ -6,6 +6,7 @@
                 <ng-container *ngFor="let part of message.content">
                     <span *ngIf="part.type === 'text'" [innerHTML]="formatMarkdown(part.text)"></span>
                     <img *ngIf="part.type === 'image_url'" [src]="part.image_url.url" alt="Image content" style="max-width: 200px; max-height: 200px; display: block;">
+                    <pre *ngIf="part.type === 'thinking_steps'" class="thinking-steps">{{ part.text }}</pre>
                 </ng-container>
             </div>
         </div>
@@ -63,6 +64,11 @@
                     </mat-option>
                 </mat-select>
             </mat-form-field>
+        </div>
+        <div class="setting-group">
+            <label for="sequentialThinkingToggle">Enable Sequential Thinking:</label>
+            <input type="checkbox" id="sequentialThinkingToggle" [(ngModel)]="sequentialThinkingEnabled" (change)="onSequentialThinkingToggleChange()">
+            <span class="status-indicator" [ngClass]="sequentialThinkingStatus">{{ sequentialThinkingStatus }}</span>
         </div>
         <button id="saveSettingsButton" (click)="saveSettings()">Save Settings</button>
     </div>

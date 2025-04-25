@@ -44,6 +44,9 @@ export class AppComponent implements OnInit {
   settingsPanelOpen: boolean = false; // State for the settings panel
   selectedLlmMode: string = 'openrouter'; // Property to hold the selected LLM mode
 
+  sequentialThinkingEnabled: boolean = false; // State for the Sequential Thinking toggle
+  sequentialThinkingStatus: string = 'unknown'; // State for the Sequential Thinking server status
+
   constructor(private http: HttpClient) {
     // Existing constructor code (if any)
   }
@@ -65,6 +68,34 @@ export class AppComponent implements OnInit {
     ).subscribe(filteredModels => {
       this.filteredModels = filteredModels;
     });
+
+    // Fetch initial Sequential Thinking server status
+    this.fetchSequentialThinkingStatus();
+
+    // Load Sequential Thinking preference from localStorage
+    const savedSequentialThinkingEnabled = localStorage.getItem('sequentialThinkingEnabled');
+    if (savedSequentialThinkingEnabled !== null) {
+      this.sequentialThinkingEnabled = JSON.parse(savedSequentialThinkingEnabled);
+    }
+  }
+
+  fetchSequentialThinkingStatus(): void {
+    this.http.get<any>(`${this.backendUrl}/api/mcp/sequential-thinking/status`).subscribe({
+      next: (response) => {
+        this.sequentialThinkingStatus = response.status;
+        // Optionally, update sequentialThinkingEnabled based on server's enabled status
+        // if the backend is the source of truth for initial state.
+        // For now, we rely on localStorage for user preference.
+      },
+      error: (error) => {
+        console.error('Error fetching Sequential Thinking status:', error);
+        this.sequentialThinkingStatus = 'error';
+      }
+    });
+  }
+
+  onSequentialThinkingToggleChange(): void {
+    localStorage.setItem('sequentialThinkingEnabled', JSON.stringify(this.sequentialThinkingEnabled));
   }
 
   private _filterModels(value: string): Model[] {
@@ -181,14 +212,36 @@ export class AppComponent implements OnInit {
       // Note: The API key should ideally be handled securely (e.g., via environment variables or a backend proxy)
       // and not hardcoded directly in the frontend code.
 
-      const requestBody = {
+      const requestBody: any = {
         model: modelId,
         messages: this.conversationHistory // Send the entire conversation history
       };
 
+      // Add Sequential Thinking parameters if enabled and server is running
+      if (this.sequentialThinkingEnabled && this.sequentialThinkingStatus === 'running') {
+        requestBody.use_sequential_thinking = true;
+        // Add sequential_thinking_params if needed based on the plan.
+        // The plan mentions deriving thought, thoughtNumber from chat context,
+        // but doesn't specify the exact structure or how to derive them.
+        // For now, I will omit sequential_thinking_params as it's optional
+        // and the backend might handle default values or derive them itself.
+        // If the plan provided more details, I would add them here.
+        // requestBody.sequential_thinking_params = { ... };
+      }
+
       this.http.post(openRouterApiUrl, requestBody, { headers }).subscribe({
         next: (data: any) => {
           console.log('Received data from OpenRouter:', data); // Log the whole data object
+
+          // Handle thinking steps if present
+          if (data.thinking_steps) {
+            const thinkingMessage: ChatMessage = {
+              role: 'assistant', // Or a new role like 'thinking' if styled differently
+              content: [{ type: 'thinking_steps', text: 'Thinking Steps:\n' + data.thinking_steps }]
+            };
+            this.conversationHistory.push(thinkingMessage);
+          }
+
           // Assuming the response structure is similar to OpenAI chat completions
           const assistantMessageContent = data.choices?.[0]?.message?.content;
           console.log('Extracted response:', assistantMessageContent); // Log the extracted value
@@ -200,7 +253,7 @@ export class AppComponent implements OnInit {
             };
             // Add assistant message to history
             this.conversationHistory.push(assistantMessage);
-          } else {
+          } else if (!data.thinking_steps) { // Only show error if no thinking steps either
             console.error('LLM response not found in data object:', data);
             // Optionally add an error message to the history
             this.conversationHistory.push({
@@ -240,6 +293,8 @@ export class AppComponent implements OnInit {
       } else if (item.type === 'image_url') {
         // Assuming the image_url.url contains the base64 data URL
         html += `<img src="${item.image_url.url}" alt="Uploaded image" class="chat-image">`;
+      } else if (item.type === 'thinking_steps') {
+         html += `<pre class="thinking-steps">${item.text}</pre>`;
       }
     }
 
@@ -479,6 +534,6 @@ export class AppComponent implements OnInit {
 // Define the ChatMessage interface
 interface ChatMessage {
   role: 'user' | 'assistant';
-  content: Array<{ type: 'text', text: string } | { type: 'image_url', image_url: { url: string; detail?: string } }>;
+  content: Array<{ type: 'text', text: string } | { type: 'image_url', image_url: { url: string; detail?: string } } | { type: 'thinking_steps', text: string }>;
 }
 

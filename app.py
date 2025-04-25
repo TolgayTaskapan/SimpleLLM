@@ -1,12 +1,15 @@
 import requests
+import asyncio
+import json
+import os
+import sys
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from llama_cpp import Llama
 import uvicorn
-import os
 import torch
 
 app = FastAPI()
@@ -23,12 +26,186 @@ app.add_middleware(
     allow_headers=["*"], # Allow all headers
 )
 
+# --- MCP Sequential Thinking Integration ---
+MCP_SEQUENTIAL_THINKING_COMMAND = os.environ.get("MCP_SEQUENTIAL_THINKING_COMMAND", "npx -y @modelcontextprotocol/server-sequential-thinking")
+MCP_SEQUENTIAL_THINKING_ENABLED = os.environ.get("MCP_SEQUENTIAL_THINKING_ENABLED", "true").lower() == "true"
+
+mcp_sequential_thinking_process: Optional[asyncio.subprocess.Process] = None
+mcp_sequential_thinking_status: str = "stopped" # "stopped", "starting", "running", "error", "disabled"
+mcp_sequential_thinking_output_queue: asyncio.Queue = asyncio.Queue()
+mcp_sequential_thinking_response_futures: Dict[str, asyncio.Future] = {}
+mcp_sequential_thinking_request_counter: int = 0
+
+async def read_mcp_output(stream: asyncio.StreamReader, queue: asyncio.Queue):
+    """Reads lines from the MCP process stdout/stderr and puts them in a queue."""
+    while True:
+        try:
+            line = await stream.readline()
+            if not line:
+                break
+            await queue.put(line.decode().strip())
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"Error reading from MCP stream: {e}", file=sys.stderr)
+            break
+
+async def handle_mcp_responses(output_queue: asyncio.Queue):
+    """Handles messages from the MCP process output queue."""
+    while True:
+        try:
+            message = await output_queue.get()
+            print(f"Received from MCP: {message}")
+            try:
+                response = json.loads(message)
+                if "id" in response and response["id"] in mcp_sequential_thinking_response_futures:
+                    future = mcp_sequential_thinking_response_futures.pop(response["id"])
+                    future.set_result(response)
+                elif "error" in response:
+                     print(f"MCP Error: {response['error']}", file=sys.stderr)
+                # Handle other potential message types if needed
+            except json.JSONDecodeError:
+                print(f"Failed to decode JSON from MCP: {message}", file=sys.stderr)
+            except Exception as e:
+                print(f"Error processing MCP message: {e}", file=sys.stderr)
+            finally:
+                output_queue.task_done()
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            print(f"Error in MCP response handler: {e}", file=sys.stderr)
+            break
+
+async def start_mcp_sequential_thinking():
+    """Starts the sequential thinking MCP server process."""
+    global mcp_sequential_thinking_process, mcp_sequential_thinking_status, mcp_sequential_thinking_output_queue
+
+    if not MCP_SEQUENTIAL_THINKING_ENABLED:
+        mcp_sequential_thinking_status = "disabled"
+        print("Sequential Thinking MCP is disabled via environment variable.")
+        return
+
+    mcp_sequential_thinking_status = "starting"
+    print(f"Starting Sequential Thinking MCP server with command: {MCP_SEQUENTIAL_THINKING_COMMAND}")
+
+    try:
+        # Split command into parts for create_subprocess_exec
+        command_parts = MCP_SEQUENTIAL_THINKING_COMMAND.split()
+        mcp_sequential_thinking_process = await asyncio.create_subprocess_exec(
+            command_parts[0],
+            *command_parts[1:],
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        mcp_sequential_thinking_status = "running"
+        print("Sequential Thinking MCP server started successfully.")
+
+        # Start background tasks to read stdout and stderr
+        asyncio.create_task(read_mcp_output(mcp_sequential_thinking_process.stdout, mcp_sequential_thinking_output_queue))
+        asyncio.create_task(read_mcp_output(mcp_sequential_thinking_process.stderr, mcp_sequential_thinking_output_queue))
+        asyncio.create_task(handle_mcp_responses(mcp_sequential_thinking_output_queue))
+
+    except FileNotFoundError:
+        mcp_sequential_thinking_status = "error"
+        print(f"Error: Command not found. Make sure '{command_parts[0]}' is in your PATH.", file=sys.stderr)
+    except Exception as e:
+        mcp_sequential_thinking_status = "error"
+        print(f"Error starting Sequential Thinking MCP server: {e}", file=sys.stderr)
+
+async def stop_mcp_sequential_thinking():
+    """Stops the sequential thinking MCP server process."""
+    global mcp_sequential_thinking_process, mcp_sequential_thinking_status
+    if mcp_sequential_thinking_process and mcp_sequential_thinking_process.returncode is None:
+        print("Stopping Sequential Thinking MCP server...")
+        try:
+            mcp_sequential_thinking_process.terminate()
+            await asyncio.wait_for(mcp_sequential_thinking_process.wait(), timeout=5.0)
+            print("Sequential Thinking MCP server stopped.")
+        except asyncio.TimeoutError:
+            print("Sequential Thinking MCP server did not terminate gracefully, killing...", file=sys.stderr)
+            mcp_sequential_thinking_process.kill()
+        except Exception as e:
+            print(f"Error stopping Sequential Thinking MCP server: {e}", file=sys.stderr)
+        finally:
+            mcp_sequential_thinking_process = None
+            mcp_sequential_thinking_status = "stopped"
+
+async def invoke_sequential_thinking(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Invokes the sequential_thinking tool on the MCP server."""
+    global mcp_sequential_thinking_request_counter
+    if mcp_sequential_thinking_status != "running" or not mcp_sequential_thinking_process or not mcp_sequential_thinking_process.stdin:
+        raise HTTPException(status_code=503, detail=f"Sequential Thinking MCP server is not running. Status: {mcp_sequential_thinking_status}")
+
+    mcp_sequential_thinking_request_counter += 1
+    request_id = f"req-{mcp_sequential_thinking_request_counter}"
+
+    jsonrpc_request = {
+        "jsonrpc": "2.0",
+        "method": "sequentialthinking",
+        "params": params,
+        "id": request_id
+    }
+
+    try:
+        future = asyncio.Future()
+        mcp_sequential_thinking_response_futures[request_id] = future
+
+        request_str = json.dumps(jsonrpc_request) + "\n"
+        mcp_sequential_thinking_process.stdin.write(request_str.encode())
+        await mcp_sequential_thinking_process.stdin.drain()
+        print(f"Sent to MCP: {request_str.strip()}")
+
+        response = await asyncio.wait_for(future, timeout=60.0) # Wait for response with timeout
+
+        if "result" in response:
+            return response["result"]
+        elif "error" in response:
+            print(f"MCP returned error for request {request_id}: {response['error']}", file=sys.stderr)
+            raise HTTPException(status_code=500, detail=f"MCP tool error: {response['error'].get('message', 'Unknown error')}")
+        else:
+            print(f"Invalid JSON-RPC response from MCP for request {request_id}: {response}", file=sys.stderr)
+            raise HTTPException(status_code=500, detail="Invalid response from MCP server")
+
+    except asyncio.TimeoutError:
+        # Clean up the future if timeout occurs
+        if request_id in mcp_sequential_thinking_response_futures:
+            del mcp_sequential_thinking_response_futures[request_id]
+        print(f"Timeout waiting for MCP response for request {request_id}", file=sys.stderr)
+        raise HTTPException(status_code=504, detail="Timeout waiting for Sequential Thinking MCP response")
+    except Exception as e:
+        print(f"Error invoking Sequential Thinking MCP: {e}", file=sys.stderr)
+        raise HTTPException(status_code=500, detail=f"Error communicating with MCP server: {e}")
+
+@app.on_event("startup")
+async def startup_event():
+    """FastAPI startup event: Start the MCP server."""
+    await start_mcp_sequential_thinking()
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """FastAPI shutdown event: Stop the MCP server."""
+    await stop_mcp_sequential_thinking()
+
+# --- End MCP Sequential Thinking Integration ---
+
 
 # Load the GPTQ model
 repo_id = "mradermacher/DeepSeek-R1-Distill-Qwen-14B-Uncensored-GGUF"
 filename = "DeepSeek-R1-Distill-Qwen-14B-Uncensored.IQ4_XS.gguf"
 
 print(f"Loading model from repo: {repo_id} with filename {filename}...")
+# Check if CUDA is available and set device accordingly
+if torch.cuda.is_available():
+    print("CUDA is available. Using GPU.")
+    # You might need to specify the device explicitly if you have multiple GPUs
+    # device = torch.device("cuda:0")
+    # model = Llama.from_pretrained(..., device=device)
+else:
+    print("CUDA not available. Using CPU.")
+    # If using CPU, you might want to adjust n_gpu_layers
+    # n_gpu_layers = 0
+
 model = Llama.from_pretrained(
     repo_id=repo_id,
     filename=filename,
@@ -45,6 +222,11 @@ class ChatRequest(BaseModel):
     apiKey: str = None
     modelId: str = None
     imageData: Optional[str] = None
+    # --- MCP Sequential Thinking Integration ---
+    use_sequential_thinking: Optional[bool] = False
+    sequential_thinking_params: Optional[Dict[str, Any]] = None
+    # --- End MCP Sequential Thinking Integration ---
+
 class PricingInfo(BaseModel):
     prompt: Optional[float] = None
     completion: Optional[float] = None
@@ -65,6 +247,23 @@ async def chat_completion(request: ChatRequest):
         mode = request.mode
         api_key = request.apiKey
         model_id = request.modelId
+        image_data = request.imageData
+
+        # --- MCP Sequential Thinking Integration ---
+        thinking_output = None
+        if request.use_sequential_thinking and mcp_sequential_thinking_status == "running" and request.sequential_thinking_params:
+            print("Invoking Sequential Thinking MCP...")
+            try:
+                thinking_output = await invoke_sequential_thinking(request.sequential_thinking_params)
+                print("Sequential Thinking MCP invocation successful.")
+            except HTTPException as e:
+                print(f"Error invoking Sequential Thinking MCP: {e.detail}", file=sys.stderr)
+                # Decide how to handle this error: return it, log and continue, etc.
+                # For now, we'll just log and continue with the LLM call
+                pass # Or re-raise e if you want to stop the chat request
+
+        # --- End MCP Sequential Thinking Integration ---
+
 
         if mode == 'local':
             print(f"Generating completion for prompt (local mode): {user_prompt}")
@@ -79,14 +278,11 @@ async def chat_completion(request: ChatRequest):
             )
             response_text = output["choices"][0]["text"]
             print(f"Generated response (local mode): {response_text}")
-            return {"response": response_text}
+            response_payload = {"response": response_text}
 
         elif mode == 'openrouter':
             if not api_key or not model_id:
                 raise HTTPException(status_code=400, detail="apiKey and modelId are required for openrouter mode")
-
-            # Retrieve imageData
-            image_data = request.imageData
 
             print(f"Generating completion for prompt (openrouter mode): {user_prompt} with model {model_id}")
 
@@ -122,17 +318,35 @@ async def chat_completion(request: ChatRequest):
             response_text = response_data['choices'][0]['message']['content']
 
             print(f"Generated response (openrouter mode): {response_text}")
-            return {"response": response_text}
+            response_payload = {"response": response_text}
 
         else:
             raise HTTPException(status_code=400, detail="Invalid mode specified. Use 'local' or 'openrouter'.")
+
+        # --- MCP Sequential Thinking Integration ---
+        if thinking_output:
+            response_payload["sequential_thinking_output"] = thinking_output
+        # --- End MCP Sequential Thinking Integration ---
+
+        return response_payload
 
     except requests.exceptions.RequestException as e:
         print(f"Error during OpenRouter API call: {e}")
         raise HTTPException(status_code=500, detail=f"OpenRouter API error: {e}")
     except Exception as e:
-        print(f"Error during chat completion: {e}")
+        print(f"Error during chat completion: {e}", file=sys.stderr)
         raise HTTPException(status_code=500, detail=str(e))
+
+# --- MCP Sequential Thinking Integration ---
+@app.get('/api/mcp/sequential-thinking/status')
+async def get_sequential_thinking_status():
+    """Returns the current status of the Sequential Thinking MCP server."""
+    return {
+        "status": mcp_sequential_thinking_status,
+        "enabled": MCP_SEQUENTIAL_THINKING_ENABLED
+    }
+# --- End MCP Sequential Thinking Integration ---
+
 
 class ApiKeyRequest(BaseModel):
     api_key: str
