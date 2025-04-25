@@ -3,12 +3,15 @@ import asyncio
 import json
 import os
 import sys
+import logging
 from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import uvicorn
+
+logging.basicConfig(level=logging.INFO)
 
 app = FastAPI()
 
@@ -53,6 +56,7 @@ async def handle_mcp_responses(output_queue: asyncio.Queue):
     while True:
         try:
             message = await output_queue.get()
+            logging.info(f"Raw response from MCP: {message}")
             print(f"Received from MCP: {message}")
             try:
                 response = json.loads(message)
@@ -217,12 +221,16 @@ async def chat_completion(request: ChatRequest):
         model_id = request.modelId
         image_data = request.imageData
 
+        logging.info(f"Received use_sequential_thinking: {request.use_sequential_thinking}")
+
         # --- MCP Sequential Thinking Integration ---
         thinking_output = None
         if request.use_sequential_thinking and mcp_sequential_thinking_status == "running" and request.sequential_thinking_params:
+            logging.info(f"Invoking Sequential Thinking MCP with params: {request.sequential_thinking_params}")
             print("Invoking Sequential Thinking MCP...")
             try:
                 thinking_output = await invoke_sequential_thinking(request.sequential_thinking_params)
+                logging.info(f"Sequential Thinking MCP invocation successful. Output: {thinking_output}")
                 print("Sequential Thinking MCP invocation successful.")
             except HTTPException as e:
                 print(f"Error invoking Sequential Thinking MCP: {e.detail}", file=sys.stderr)
@@ -275,6 +283,7 @@ async def chat_completion(request: ChatRequest):
         # --- MCP Sequential Thinking Integration ---
         if thinking_output:
             response_payload["sequential_thinking_output"] = thinking_output
+            logging.info(f"Sending response to frontend with sequential_thinking_output: {response_payload.get('sequential_thinking_output')}")
         # --- End MCP Sequential Thinking Integration ---
 
         return response_payload

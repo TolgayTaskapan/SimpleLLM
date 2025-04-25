@@ -6,8 +6,14 @@
                 <ng-container *ngFor="let part of message.content">
                     <span *ngIf="part.type === 'text'" [innerHTML]="formatMarkdown(part.text)"></span>
                     <img *ngIf="part.type === 'image_url'" [src]="part.image_url.url" alt="Image content" style="max-width: 200px; max-height: 200px; display: block;">
-                    <pre *ngIf="part.type === 'thinking_steps'" class="thinking-steps">{{ part.text }}</pre>
                 </ng-container>
+                <!-- Display thinking steps if they exist -->
+                <div *ngIf="message.thinking_steps" class="thinking-steps-container">
+                    <strong>Thinking Steps:</strong>
+                    <div *ngFor="let step of message.thinking_steps" class="thinking-step">
+                        {{ step.thought }}
+                    </div>
+                </div>
             </div>
         </div>
     </div>

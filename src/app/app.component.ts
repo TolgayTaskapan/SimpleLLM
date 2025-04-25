@@ -232,33 +232,37 @@ export class AppComponent implements OnInit {
         next: (data: any) => {
           console.log('Received data from OpenRouter:', data); // Log the whole data object
 
-          // Handle thinking steps if present
-          if (data.thinking_steps) {
-            const thinkingMessage: ChatMessage = {
-              role: 'assistant', // Or a new role like 'thinking' if styled differently
-              content: [{ type: 'thinking_steps', text: 'Thinking Steps:\n' + data.thinking_steps }]
-            };
-            this.conversationHistory.push(thinkingMessage);
-          }
-
           // Assuming the response structure is similar to OpenAI chat completions
           const assistantMessageContent = data.choices?.[0]?.message?.content;
           console.log('Extracted response:', assistantMessageContent); // Log the extracted value
+
+          // Create assistant message object
+          const assistantMessage: ChatMessage = {
+            role: 'assistant',
+            content: []
+          };
+
           if (assistantMessageContent) {
-            // Create assistant message object
-            const assistantMessage: ChatMessage = {
-              role: 'assistant',
-              content: [{ type: 'text', text: assistantMessageContent }]
-            };
-            // Add assistant message to history
-            this.conversationHistory.push(assistantMessage);
-          } else if (!data.thinking_steps) { // Only show error if no thinking steps either
-            console.error('LLM response not found in data object:', data);
-            // Optionally add an error message to the history
-            this.conversationHistory.push({
-              role: 'assistant',
-              content: [{ type: 'text', text: 'Error: Could not get response from model.' }]
-            });
+            assistantMessage.content.push({ type: 'text', text: assistantMessageContent });
+          }
+
+          // Handle thinking steps if present and add to the assistant message
+          if (data.thinking_steps && Array.isArray(data.thinking_steps)) {
+             // Assuming thinking_steps is an array of objects, each with a 'thought' property
+             assistantMessage.thinking_steps = data.thinking_steps.map((step: any) => ({ thought: step.thought }));
+          }
+
+
+          if (assistantMessage.content.length > 0 || (assistantMessage.thinking_steps && assistantMessage.thinking_steps.length > 0)) {
+             // Add assistant message to history only if it has content or thinking steps
+             this.conversationHistory.push(assistantMessage);
+          } else {
+             console.error('LLM response and thinking steps not found in data object:', data);
+             // Optionally add an error message to the history
+             this.conversationHistory.push({
+               role: 'assistant',
+               content: [{ type: 'text', text: 'Error: Could not get response from model.' }]
+             });
           }
         },
         error: (error) => {
@@ -533,6 +537,7 @@ export class AppComponent implements OnInit {
 // Define the ChatMessage interface
 interface ChatMessage {
   role: 'user' | 'assistant';
-  content: Array<{ type: 'text', text: string } | { type: 'image_url', image_url: { url: string; detail?: string } } | { type: 'thinking_steps', text: string }>;
+  content: Array<{ type: 'text', text: string } | { type: 'image_url', image_url: { url: string; detail?: string } }>;
+  thinking_steps?: Array<{ thought: string }>; // Add optional thinking_steps property
 }
 
