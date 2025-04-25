@@ -337,7 +337,7 @@ async def get_models(authorization: str = Header(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {e}")
 
-app.mount("/static", StaticFiles(directory="angular-app/dist/angular-app", html = True), name="static")
+app.mount("/static", StaticFiles(directory="dist/angular-app", html = True), name="static")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
