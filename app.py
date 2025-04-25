@@ -87,11 +87,9 @@ async def start_mcp_sequential_thinking():
     print(f"Starting Sequential Thinking MCP server with command: {MCP_SEQUENTIAL_THINKING_COMMAND}")
 
     try:
-        # Split command into parts for create_subprocess_exec
-        command_parts = MCP_SEQUENTIAL_THINKING_COMMAND.split()
-        mcp_sequential_thinking_process = await asyncio.create_subprocess_exec(
-            command_parts[0],
-            *command_parts[1:],
+        # Use create_subprocess_shell to allow the system shell to resolve the command
+        mcp_sequential_thinking_process = await asyncio.create_subprocess_shell(
+            MCP_SEQUENTIAL_THINKING_COMMAND,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
