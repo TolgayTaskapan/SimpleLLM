@@ -231,18 +231,6 @@ body {
     background-color: #218838;
 }
 
-.mode-selection {
-    margin-bottom: 15px;
-}
-
-.mode-selection > div {
-    margin-bottom: 10px; /* Add vertical spacing between options */
-}
-
-.mode-selection label {
-    margin-right: 10px;
-    font-weight: normal;
-}
 
 .upload-btn {
     padding: 10px; /* Adjust padding as needed */

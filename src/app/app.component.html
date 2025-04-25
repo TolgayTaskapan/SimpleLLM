@@ -30,17 +30,6 @@
         <button class="close-panel-btn" (click)="closeSettingsPanel()">&times;</button>
     </div>
     <div class="settings-panel-content">
-        <div class="mode-selection">
-          <label>Mode:</label>
-          <div> <!-- Wrapper for first option -->
-            <input type="radio" id="modeLocal" name="llmMode" value="local" [(ngModel)]="selectedLlmMode">
-            <label for="modeLocal">Local LLM</label>
-          </div>
-          <div> <!-- Wrapper for second option -->
-            <input type="radio" id="modeOpenRouter" name="llmMode" value="openrouter" [(ngModel)]="selectedLlmMode"> <!-- Default -->
-            <label for="modeOpenRouter">OpenRouter</label>
-          </div>
-        </div>
         <div class="setting-group">
             <label for="apiKeyInput">OpenRouter API Key:</label>
             <input type="password" id="apiKeyInput" [(ngModel)]="apiKeyInput">

@@ -42,7 +42,6 @@ export class AppComponent implements OnInit {
   modelSelector: string = ''; // Model for the selected model ID
   modelFilterCtrl = new FormControl(''); // FormControl for the model filter input
   settingsPanelOpen: boolean = false; // State for the settings panel
-  selectedLlmMode: string = 'openrouter'; // Property to hold the selected LLM mode
 
   sequentialThinkingEnabled: boolean = false; // State for the Sequential Thinking toggle
   sequentialThinkingStatus: string = 'unknown'; // State for the Sequential Thinking server status
