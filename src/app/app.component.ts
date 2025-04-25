@@ -220,15 +220,12 @@ export class AppComponent implements OnInit, OnDestroy {
         return throwError(() => err);
       })
     ).subscribe(response => {
-      const assistantMessage = response.choices?.[0]?.message;
-      if (assistantMessage) {
-        let responseContent: MessageContentPart[] = [];
-        if (typeof assistantMessage.content === 'string') {
-            responseContent.push({ type: 'text', text: assistantMessage.content });
-        } else if (Array.isArray(assistantMessage.content)) {
-            responseContent = assistantMessage.content;
-        }
+      const assistantResponseText = response?.response;
+      if (assistantResponseText) {
+        const formattedResponseText = assistantResponseText.replace(/\n/g, '<br>');
+        const responseContent: MessageContentPart[] = [{ type: 'text', text: formattedResponseText }];
 
+        // Assuming thinking_steps might still be present at the top level if sequential thinking is enabled
         const thinkingSteps = (response as any).thinking_steps;
 
         this.conversationHistory.update(history => [
@@ -240,12 +237,12 @@ export class AppComponent implements OnInit, OnDestroy {
           }
         ]);
       } else {
-        console.error('Invalid response structure:', response);
+        console.error('Invalid response structure or empty response:', response);
         this.conversationHistory.update(history => [
           ...history,
-          { role: 'assistant', content: [{ type: 'text', text: 'Error: Received invalid response structure.' }] }
+          { role: 'assistant', content: [{ type: 'text', text: 'Error: Received invalid or empty response structure from backend.' }] }
         ]);
-        this.showNotification('Received invalid response structure.', 'error');
+        this.showNotification('Received invalid or empty response structure from backend.', 'error');
       }
     });
   }

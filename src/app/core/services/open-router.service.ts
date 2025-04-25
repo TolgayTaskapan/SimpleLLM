@@ -22,15 +22,14 @@ export class OpenRouterService {
   sendChatCompletion(apiKey: string, modelId: string, messages: ChatMessage[], options?: any): Observable<any> {
     // The backend /chat endpoint expects a ChatRequest body
     const body = {
-      prompt: messages.find(msg => msg.role === 'user')?.content.find(part => part.type === 'text')?.text || '', // Extract prompt text
+      messages: messages, // Include the full conversation history
       apiKey: apiKey,
       modelId: modelId,
-      imageData: messages.find(msg => msg.role === 'user')?.content.find(part => part.type === 'image_url')?.image_url.url || null, // Extract image data
       use_sequential_thinking: options?.sequentialThinkingEnabled ?? false, // Pass sequential thinking state
       sequential_thinking_params: options?.sequentialThinkingParams // Pass sequential thinking params if any
     };
 
     // Call the backend endpoint for chat completion
-    return this.http.post<any>(`/chat`, body); // No need for Authorization header here, backend handles it
+    return this.http.post<any>(`http://localhost:8000/chat`, body); // No need for Authorization header here, backend handles it
   }
 }

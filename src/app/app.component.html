@@ -4,7 +4,8 @@
         <div class="message-container" *ngFor="let message of conversationHistory()" [ngClass]="{'user-message': message.role === 'user', 'assistant-message': message.role === 'assistant'}">
             <div class="message-bubble">
                 <ng-container *ngFor="let part of message.content">
-                    <span *ngIf="part.type === 'text'" [innerHTML]="formatMarkdown(part.text)"></span>
+                    <span *ngIf="part.type === 'text' && message.role === 'assistant'" [innerHTML]="formatMarkdown(part.text)"></span>
+                    <span *ngIf="part.type === 'text' && message.role === 'user'">{{ part.text }}</span>
                     <img *ngIf="part.type === 'image_url'" [src]="part.image_url.url" alt="Image content" style="max-width: 200px; max-height: 200px; display: block;">
                 </ng-container>
                 <!-- Display thinking steps if they exist -->
@@ -23,7 +24,7 @@
           <button (click)="clearImage()">X</button>
         </div>
         <button id="imageUploadBtn" class="upload-btn" title="Upload Image" *ngIf="modelCapabilities() && selectedModelIdInput()" [class.hidden]="!modelCapabilities()?.[selectedModelIdInput()]?.includes('image')" (click)="triggerImageFileInput()">🖼️</button>
-        <button id="audioUploadBtn" class="upload-btn" title="Upload Audio" *ngIf="modelCapabilities() && selectedModelIdInput()" [class.hidden]="!modelCapabilities()[selectedModelIdInput()].includes('audio')">🎤</button>
+        <button id="audioUploadBtn" class="upload-btn" title="Upload Audio" *ngIf="modelCapabilities() && selectedModelIdInput()" [class.hidden]="!modelCapabilities()?.[selectedModelIdInput()]?.includes('audio')">🎤</button>
         <input type="text" id="prompt-input" placeholder="Enter your prompt..." [(ngModel)]="promptInput" (keydown)="onPromptKeydown($event)" (paste)="handlePaste($event)">
         <button id="submit-button" (click)="onSubmit()">Send</button>
         <button id="openSettingsPanelBtn" (click)="openSettingsPanel()">Settings</button>
