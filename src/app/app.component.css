@@ -289,3 +289,98 @@ body {
   line-height: 20px;
   cursor: pointer;
 }
+
+/* Styles for Tool Call and Tool Result messages */
+.tool-message .message-bubble {
+    background-color: #f0f0f0; /* Light gray background for tool messages */
+    color: #333;
+    border-left: 4px solid #ffc107; /* Yellow border to indicate tool interaction */
+    padding: 10px 15px;
+    border-radius: 8px;
+    margin-top: 5px;
+    font-size: 0.9em;
+}
+
+.tool-interaction-container pre {
+    white-space: pre-wrap; /* Preserve formatting and allow wrapping */
+    overflow-wrap: break-word; /* Break long words if necessary */
+}
+
+.tool-call-container {
+    margin-top: 10px;
+    padding: 10px;
+    background-color: #e9ecef; /* Lighter background for the tool call block */
+    border-left: 3px solid #007bff; /* Blue border for tool calls */
+    border-radius: 5px;
+    margin-bottom: 10px;
+}
+
+.tool-call-container strong {
+    display: block;
+    margin-bottom: 5px;
+    color: #0056b3; /* Darker blue for the label */
+}
+
+.tool-call {
+    margin-bottom: 8px;
+    padding: 8px;
+    border: 1px solid #ced4da; /* Light border around each tool call */
+    border-radius: 4px;
+    background-color: #f8f9fa; /* Very light background for individual tool calls */
+}
+
+.tool-name {
+    font-weight: bold;
+    color: #007bff; /* Blue color for tool name */
+    margin-bottom: 4px;
+}
+
+.tool-arguments {
+    font-family: 'Courier New', Courier, monospace; /* Monospace font for arguments */
+    font-size: 0.85em;
+    color: #495057; /* Dark gray for arguments */
+    white-space: pre-wrap; /* Preserve formatting */
+    overflow-wrap: break-word; /* Break long arguments if necessary */
+}
+
+.tool-result-container {
+    margin-top: 10px;
+    padding: 10px;
+    background-color: #d4edda; /* Light green background for tool result block */
+    border-left: 3px solid #28a745; /* Green border for tool results */
+    border-radius: 5px;
+}
+
+.tool-result-container strong {
+    display: block;
+    margin-bottom: 5px;
+    color: #1e7e34; /* Darker green for the label */
+}
+
+.tool-result-content {
+    font-size: 0.9em;
+    color: #333;
+    white-space: pre-wrap; /* Preserve formatting */
+}
+
+.thinking-steps-container {
+    margin-top: 10px;
+    padding: 10px;
+    background-color: #fff3cd; /* Light yellow background for thinking steps */
+    border-left: 3px solid #ffc107; /* Yellow border */
+    border-radius: 5px;
+    font-size: 0.9em;
+    color: #856404; /* Dark yellow text */
+}
+
+.thinking-steps-container strong {
+    display: block;
+    margin-bottom: 5px;
+    color: #856404; /* Dark yellow for the label */
+}
+
+.thinking-step {
+    margin-bottom: 5px;
+    padding-left: 10px;
+    border-left: 2px dotted #ffc107; /* Dotted yellow line for steps */
+}

@@ -1,30 +1,92 @@
 <div class="chat-container">
     <div id="chat-history" class="chat-history">
         <!-- Chat messages will be added here -->
-        <div class="message-container" *ngFor="let message of conversationHistory()" [ngClass]="{'user-message': message.role === 'user', 'assistant-message': message.role === 'assistant'}">
-            <div class="message-bubble">
-                <ng-container *ngFor="let part of message.content">
-                    <span *ngIf="part.type === 'text' && message.role === 'assistant'" [innerHTML]="formatMarkdown(part.text)"></span>
-                    <span *ngIf="part.type === 'text' && message.role === 'user'">{{ part.text }}</span>
-                    <img *ngIf="part.type === 'image_url'" [src]="part.image_url.url" alt="Image content" style="max-width: 200px; max-height: 200px; display: block;">
-                </ng-container>
-                <!-- Display thinking steps if they exist -->
-                <div *ngIf="message.thinking_steps" class="thinking-steps-container">
-                    <strong>Thinking Steps:</strong>
-                    <div *ngFor="let step of message.thinking_steps" class="thinking-step">
-                        {{ step.thought }}
-                    </div>
+        <ng-container *ngFor="let message of conversationHistory(); trackBy: trackByMessage">
+            <div class="message-container" [ngClass]="{'user-message': message.role === 'user', 'assistant-message': message.role === 'assistant', 'tool-message': message.role === 'tool', 'tool-interaction-message': message.messageType === 'tool_interaction'}">
+                <div class="message-bubble">
+                    <ng-container *ngIf="message.messageType === 'tool_interaction'">
+                        <div class="tool-interaction-container">
+                            <strong>Tool Interaction: {{ message.toolName }}</strong>
+                            <div *ngIf="message.toolStep === 'call'">
+                                <strong>Arguments:</strong>
+                                <pre>{{ message.toolData | json }}</pre>
+                            </div>
+                            <div *ngIf="message.toolStep === 'response'">
+                                <strong>Response:</strong>
+                                <pre>{{ message.toolData | json }}</pre>
+                            </div>
+                        </div>
+                    </ng-container>
+                    <ng-container *ngIf="message.messageType !== 'tool_interaction'">
+                        <ng-container [ngSwitch]="message.role">
+                            <ng-container *ngSwitchCase="'user'">
+                                <ng-container *ngFor="let part of message.content">
+                                    <span *ngIf="part.type === 'text'">{{ part.text }}</span>
+                                    <img *ngIf="part.type === 'image_url'" [src]="part.image_url.url" alt="Image content" style="max-width: 200px; max-height: 200px; display: block;">
+                                </ng-container>
+                            </ng-container>
+
+                            <ng-container *ngSwitchCase="'assistant'">
+                                <!-- Display tool calls if they exist -->
+                                <div *ngIf="message.tool_calls && message.tool_calls.length > 0" class="tool-call-container">
+                                    <strong>Tool Call:</strong>
+                                    <div *ngFor="let toolCall of message.tool_calls" class="tool-call">
+                                        <div class="tool-name">{{ toolCall.function.name }}</div>
+                                        <div class="tool-arguments">{{ toolCall.function.arguments }}</div>
+                                    </div>
+                                </div>
+                                <!-- Display regular assistant text content -->
+                                <ng-container *ngIf="message.content && message.content.length > 0">
+                                    <ng-container *ngFor="let part of message.content">
+                                        <span *ngIf="part.type === 'text'" [innerHTML]="formatMarkdown(part.text)"></span>
+                                        <img *ngIf="part.type === 'image_url'" [src]="part.image_url.url" alt="Image content" style="max-width: 200px; max-height: 200px; display: block;">
+                                    </ng-container>
+                                </ng-container>
+                                 <!-- Display thinking steps if they exist -->
+                                <div *ngIf="message.thinking_steps" class="thinking-steps-container">
+                                    <strong>Thinking Steps:</strong>
+                                    <div *ngFor="let step of message.thinking_steps" class="thinking-step">
+                                        {{ step.thought }}
+                                    </div>
+                                </div>
+                            </ng-container>
+
+                            <ng-container *ngSwitchCase="'tool'">
+                                <!-- Display tool result -->
+                                <div class="tool-result-container">
+                                    <strong>Tool Result:</strong>
+                                    <div class="tool-result-content">
+                                        <ng-container *ngFor="let part of message.content">
+                                            <span *ngIf="part.type === 'text'">{{ part.text }}</span>
+                                            <img *ngIf="part.type === 'image_url'" [src]="part.image_url.url" alt="Image content" style="max-width: 200px; max-height: 200px; display: block;">
+                                        </ng-container>
+                                    </div>
+                                </div>
+                            </ng-container>
+
+                            <ng-container *ngSwitchDefault>
+                                <!-- Handle other roles or unexpected messages -->
+                                <div class="unknown-message">
+                                    <strong>Unknown Message Role: {{ message.role }}</strong>
+                                    <ng-container *ngFor="let part of message.content">
+                                        <span *ngIf="part.type === 'text'">{{ part.text }}</span>
+                                        <img *ngIf="part.type === 'image_url'" [src]="part.image_url.url" alt="Image content" style="max-width: 200px; max-height: 200px; display: block;">
+                                    </ng-container>
+                                </div>
+                            </ng-container>
+                        </ng-container>
+                    </ng-container>
                 </div>
             </div>
-        </div>
+        </ng-container>
     </div>
     <div class="input-area">
         <div *ngIf="uploadedImageData()" class="image-preview-container">
           <img [src]="uploadedImageData()" alt="Selected image preview" class="image-preview">
           <button (click)="clearImage()">X</button>
         </div>
-        <button id="imageUploadBtn" class="upload-btn" title="Upload Image" *ngIf="modelCapabilities() && selectedModelIdInput()" [class.hidden]="!modelCapabilities()?.[selectedModelIdInput()]?.includes('image')" (click)="triggerImageFileInput()">🖼️</button>
-        <button id="audioUploadBtn" class="upload-btn" title="Upload Audio" *ngIf="modelCapabilities() && selectedModelIdInput()" [class.hidden]="!modelCapabilities()?.[selectedModelIdInput()]?.includes('audio')">🎤</button>
+        <button id="imageUploadBtn" class="upload-btn" title="Upload Image" *ngIf="modelCapabilities() && selectedModelIdInput()" [class.hidden]="!(modelCapabilities()[selectedModelIdInput()] ?? []).includes('image')" (click)="triggerImageFileInput()">🖼️</button>
+        <button id="audioUploadBtn" class="upload-btn" title="Upload Audio" *ngIf="modelCapabilities() && selectedModelIdInput()" [class.hidden]="!(modelCapabilities()[selectedModelIdInput()] ?? []).includes('audio')">🎤</button>
         <input type="text" id="prompt-input" placeholder="Enter your prompt..." [(ngModel)]="promptInput" (keydown)="onPromptKeydown($event)" (paste)="handlePaste($event)">
         <button id="submit-button" (click)="onSubmit()">Send</button>
         <button id="openSettingsPanelBtn" (click)="openSettingsPanel()">Settings</button>

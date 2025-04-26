@@ -1,5 +1,5 @@
-import { Component, OnInit, OnDestroy, ChangeDetectorRef, inject, signal, computed, effect } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, ElementRef, NgZone, OnInit, signal, WritableSignal, OnDestroy, inject, ChangeDetectorRef, computed, effect } from '@angular/core';
+import { CommonModule, JsonPipe } from '@angular/common';
 import { FormsModule, ReactiveFormsModule, FormControl } from '@angular/forms';
 import { HttpClient, HttpErrorResponse, HttpClientModule } from '@angular/common/http';
 import { MatSelectModule } from '@angular/material/select';
@@ -43,6 +43,7 @@ import { FormatCostPipe } from './pipes/format-cost.pipe';
     MatButtonModule,
     MatSnackBarModule,
     FormatCostPipe,
+    JsonPipe, // Add JsonPipe for formatting JSON in template
   ],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css'],
@@ -91,7 +92,10 @@ export class AppComponent implements OnInit, OnDestroy {
   // --- Lifecycle ---
   private destroy$ = new Subject<void>();
 
-  constructor() {
+  constructor(
+    private elementRef: ElementRef,
+    private zone: NgZone
+  ) {
     // Effect to save config whenever relevant input signals change (debounced?)
     effect(() => {
       const currentConfig = this.config();
@@ -138,7 +142,7 @@ export class AppComponent implements OnInit, OnDestroy {
   // --- Model Fetching ---
   private fetchModels(apiKey: string): void {
     this.isLoading.set(true);
-    this.openRouterService.getModels(apiKey).pipe(
+    (this.openRouterService.getModels(apiKey) as Observable<Model[]>).pipe(
       takeUntil(this.destroy$),
       finalize(() => this.isLoading.set(false)),
       catchError((err: HttpErrorResponse) => {
@@ -147,10 +151,10 @@ export class AppComponent implements OnInit, OnDestroy {
         this.allModels.set([]);
         return throwError(() => err);
       })
-    ).subscribe(models => {
+    ).subscribe((models: Model[]) => {
       this.allModels.set(models);
       const currentModelId = this.config().selectedModelId;
-      if (!currentModelId || !models.some(m => m.id === currentModelId)) {
+      if (!currentModelId || !models.some((m: Model) => m.id === currentModelId)) {
         const defaultModelId = models.length > 0 ? models[0].id : null;
         if (defaultModelId) {
             this.selectedModelIdInput.set(defaultModelId);
@@ -164,6 +168,8 @@ export class AppComponent implements OnInit, OnDestroy {
 
   // --- Chat Logic ---
   onSubmit(): void {
+
+    console.log('onSubmit triggered.');
     const promptText = this.promptInput().trim();
     const image = this.uploadedImageData();
     const currentConfig = this.config();
@@ -191,6 +197,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
     const userMessage: ChatMessage = { role: 'user', content: userContent };
     this.conversationHistory.update(history => [...history, userMessage]);
+    console.log('User message added to history.');
 
     // Clear inputs
     this.promptInput.set('');
@@ -201,53 +208,242 @@ export class AppComponent implements OnInit, OnDestroy {
     // Prepare history for API (limit length if necessary)
     const apiHistory = [...this.conversationHistory()];
 
-    this.openRouterService.sendChatCompletion(
-      currentConfig.openRouterApiKey,
-      currentConfig.selectedModelId,
-      apiHistory,
-      {
-        sequentialThinkingEnabled: currentConfig.sequentialThinkingEnabled, // Pass sequential thinking state
-        imageData: image // Pass uploaded image data
-      }
-    ).pipe(
-      takeUntil(this.destroy$),
-      finalize(() => this.isLoading.set(false)),
-      catchError((err: HttpErrorResponse) => {
-        console.error('Error sending message:', err);
-        const errorText = `Error: ${err.error?.error?.message || err.message || 'Unknown error'}`;
-        this.conversationHistory.update(history => [
-          ...history,
-          { role: 'assistant', content: [{ type: 'text', text: errorText }] }
-        ]);
-        this.showNotification('Failed to get response from model.', 'error');
-        return throwError(() => err);
-      })
-    ).subscribe(response => {
-      const assistantResponseText = response?.response;
-      if (assistantResponseText) {
-        const formattedResponseText = assistantResponseText.replace(/\n/g, '<br>');
-        const responseContent: MessageContentPart[] = [{ type: 'text', text: formattedResponseText }];
+    // Add user message to history immediately
 
-        // Assuming thinking_steps might still be present at the top level if sequential thinking is enabled
-        const thinkingSteps = (response as any).thinking_steps;
-
-        this.conversationHistory.update(history => [
-          ...history,
-          {
-            role: 'assistant',
-            content: responseContent,
-            thinking_steps: thinkingSteps
-          }
-        ]);
-      } else {
-        console.error('Invalid response structure or empty response:', response);
-        this.conversationHistory.update(history => [
-          ...history,
-          { role: 'assistant', content: [{ type: 'text', text: 'Error: Received invalid or empty response structure from backend.' }] }
-        ]);
-        this.showNotification('Received invalid or empty response structure from backend.', 'error');
-      }
+    // Add a loading indicator message
+    const loadingMessage: ChatMessage = {
+      role: 'assistant',
+      content: [{ type: 'text', text: '...' }],
+      isLoading: true, // Custom property to indicate loading
+      isPlaceholderReplaced: false // Initialize the flag
+    };
+    this.conversationHistory.update(history => {
+      const updatedHistory = [...history, loadingMessage];
+      console.log('Assistant placeholder added.');
+      console.log('Conversation history after assistant placeholder:', JSON.stringify(updatedHistory));
+      return updatedHistory;
     });
+    this.isLoading.set(true);
+
+    // Prepare history for API (limit length if necessary)
+
+    // Construct SSE URL with parameters
+    const baseUrl = 'http://localhost:8000/chat'; // Explicitly point to backend
+    const historyParam = encodeURIComponent(JSON.stringify(apiHistory));
+    const modelParam = encodeURIComponent(currentConfig.selectedModelId);
+    const sequentialThinkingParam = encodeURIComponent(currentConfig.sequentialThinkingEnabled.toString());
+    const imageUrlParam = image ? `&image_data=${encodeURIComponent(image)}` : ''; // Include image data if available
+
+    const urlWithParams = `${baseUrl}?model_id=${modelParam}&sequential_thinking_enabled=${sequentialThinkingParam}&history=${historyParam}${imageUrlParam}`;
+
+    const url = 'http://localhost:8000/chat'; // Explicitly point to backend
+
+    // Prepare request body
+    const requestBody = JSON.stringify({
+      prompt: promptText, // Use promptText for the prompt field
+      modelId: currentConfig.selectedModelId, // Correct casing
+      imageData: image, // Correct casing
+      messages: apiHistory, // Use messages instead of history
+      apiKey: currentConfig.openRouterApiKey // Add the API key here
+    });
+
+    console.log('Initiating fetch call...');
+    fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${currentConfig.openRouterApiKey}` // Assuming API key is needed in header
+      },
+      body: requestBody
+    })
+    .then(async (response) => {
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      }
+
+      console.log('Fetch response received, status:', response.status);
+      // Remove the loading indicator if it exists (the stream will send the actual message)
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error('Failed to get response body reader.');
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let assistantMessageIndex: number | null = null; // Track the index of the assistant message being built
+
+      // Process the stream
+      console.log('Starting stream reading loop...');
+      while (true) {
+        console.log('Reading stream chunk...');
+        const { value, done } = await reader.read();
+        console.log(`Stream read result: done=${done}, value=${value ? 'present' : 'absent'}`);
+
+        if (value) {
+          const textChunk = decoder.decode(value, { stream: true });
+          console.log('Processing chunk:', textChunk); // Added log
+
+          buffer += textChunk;
+
+          // SSE Block: Add fine-grained logging within the SSE processing block
+          console.log('SSE Block: Processing buffer (before split):', buffer); // Added fine-grained log
+
+          // Process complete SSE messages
+          const messages = buffer.split('\n');
+          buffer = messages.pop() || ''; // Keep the last incomplete message in the buffer
+
+          console.log('SSE Block: Split messages count:', messages.length); // Added fine-grained log
+          console.log('SSE Block: Remaining buffer (after split):', buffer); // Added fine-grained log
+
+          for (const messageLine of messages) { // Renamed message to messageLine for clarity
+            console.log('SSE Block: Processing message line:', messageLine); // Added fine-grained log
+// Skip empty or whitespace-only lines
+            if (!messageLine || messageLine.trim().length === 0) {
+              console.log('SSE Block: Skipping empty or whitespace line.');
+              continue;
+            }
+            if (messageLine.startsWith('data: ')) {
+              console.log('SSE Block: Found data line.'); // Added fine-grained log
+              const jsonString = messageLine.substring(6); // Remove 'data: '
+              if (jsonString && jsonString.trim()) {
+                try {
+                  console.log('SSE Block: Attempting JSON parse on:', jsonString); // Added fine-grained log
+                  const parsedData = JSON.parse(jsonString);
+                  console.log('SSE Block: JSON parsed successfully:', JSON.stringify(parsedData)); // Added fine-grained log - Stringify for full view
+
+                // Handle tool interaction messages
+                if (parsedData.type === 'tool_call_start' && parsedData.tool_name === 'sequentialthinking') {
+                  const toolCallMessage: ChatMessage = {
+                    role: 'assistant', // Or a new role if needed, but assistant fits the flow
+                    content: [{ type: 'text', text: '' }], // Content will be generated in template
+                    messageType: 'tool_interaction',
+                    toolName: parsedData.tool_name,
+                    toolStep: 'call',
+                    toolData: parsedData.arguments
+                  };
+                  this.conversationHistory.update(history => [...history, toolCallMessage]);
+                  console.log('Added tool_call_start message to history.');
+                  this.cdr.detectChanges();
+                  this.scrollToBottom();
+                } else if (parsedData.type === 'tool_call_response' && parsedData.tool_name === 'sequentialthinking') {
+                   const toolResponseMessage: ChatMessage = {
+                    role: 'assistant', // Or a new role if needed
+                    content: [{ type: 'text', text: '' }], // Content will be generated in template
+                    messageType: 'tool_interaction',
+                    toolName: parsedData.tool_name,
+                    toolStep: 'response',
+                    toolData: parsedData.response
+                  };
+                  this.conversationHistory.update(history => [...history, toolResponseMessage]);
+                  console.log('Added tool_call_response message to history.');
+                  this.cdr.detectChanges();
+                  this.scrollToBottom();
+                }
+                // Assuming the stream sends message objects or text chunks
+                // Always append to the last message in the history (which should be the assistant's)
+                else { // Only process as regular message if not a tool interaction message
+                  this.conversationHistory.update(history => {
+                    // Find the message with isLoading: true
+                    console.log('Attempting to find assistant message with isLoading: true'); // Added log
+                    const assistantMessageIndex = history.findIndex(msg => msg.role === 'assistant' && msg.isLoading);
+
+                    if (assistantMessageIndex !== -1) {
+                      const assistantMessage = history[assistantMessageIndex];
+                      console.log('Found assistant message at index:', assistantMessageIndex, JSON.stringify(assistantMessage)); // Added log
+                      console.log('Processing chunk:', parsedData.content); // Added log
+
+                      if (assistantMessage.content[0].type === 'text') {
+                        if (assistantMessage.isPlaceholderReplaced === false) {
+                          // Replace placeholder with the first chunk
+                          assistantMessage.content[0].text = parsedData.content;
+                          assistantMessage.isPlaceholderReplaced = true; // Mark placeholder as replaced
+                          console.log('Replaced placeholder with first chunk.'); // Added log
+                        } else {
+                          // Append subsequent chunks
+                          assistantMessage.content[0].text += parsedData.content;
+                          console.log('Appended subsequent chunk.'); // Added log
+                        }
+                      } else {
+                        // Handle cases where the first content part is not text, if necessary.
+                        console.warn('First content part of assistant message is not text, cannot append/replace.');
+                      }
+
+                      console.log('After update:', JSON.stringify(assistantMessage)); // Added log
+                      this.cdr.detectChanges(); // Trigger change detection after updating state
+                      this.scrollToBottom();
+                    } else {
+                       console.warn('Could not find or update the last assistant message placeholder.');
+                    }
+                    return [...history]; // Return a new array reference to trigger change detection
+                  });
+                }
+
+
+              } catch (e) {
+                console.error('SSE Block: Error parsing JSON from stream chunk:', e, 'Chunk:', jsonString); // Updated error log
+                // Continue processing the stream even if one chunk fails to parse
+              }
+            }
+            }
+            else {
+              // console.warn('Received non-data line from stream:', message);
+            }
+          }
+        }
+
+        if (done) {
+          console.log('Stream finished.');
+          break; // Ensure loop breaks if done is true
+        }
+      }
+    })
+    .catch((error) => {
+      console.error('Fetch failed:', error);
+      this.isLoading.set(false);
+      // Remove the loading indicator on error/completion
+      this.conversationHistory.update(history => history.filter(msg => !msg.isLoading));
+      this.showNotification(`Chat stream ended or encountered an error: ${error.message}`, 'error');
+      this.cdr.detectChanges();
+      this.scrollToBottom();
+    })
+    .finally(() => {
+      console.log('Fetch finally block executed.'); // Added log
+      this.isLoading.set(false);
+      // Ensure loading indicator is removed even if stream ends without explicit done
+      this.conversationHistory.update(history => {
+        console.log('Updating history in finally block to remove isLoading.'); // Added log
+        let lastAssistantMessage: ChatMessage | undefined;
+        for (let i = history.length - 1; i >= 0; i--) {
+          if (history[i].role === 'assistant') {
+            lastAssistantMessage = history[i];
+            break;
+          }
+        }
+        if (lastAssistantMessage) {
+          lastAssistantMessage.isLoading = false; // Set isLoading to false
+        }
+        return [...history];
+      });
+      this.cdr.detectChanges();
+      this.scrollToBottom();
+    });
+  }
+
+  private scrollToBottom(): void {
+    try {
+      // Query for the chat container element (adjust selector if needed)
+      const chatContainer = this.elementRef.nativeElement.querySelector('.chat-messages-container'); // Verify this selector matches your HTML
+      if (chatContainer) {
+        // Use setTimeout to allow Angular to render before scrolling
+        setTimeout(() => {
+           chatContainer.scrollTop = chatContainer.scrollHeight;
+        }, 0);
+      }
+    } catch (err) {
+      console.error('Could not scroll to bottom:', err);
+    }
   }
 
   // --- Event Handlers ---
@@ -368,7 +564,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   // --- Formatting & UI Helpers ---
   formatMarkdown(text: string): string {
-    return this.markdownService.toHtml(text);
+    return <string>this.markdownService.toHtml(text);
   }
 
   // Helper to safely get numeric price from potentially string/null pricing
