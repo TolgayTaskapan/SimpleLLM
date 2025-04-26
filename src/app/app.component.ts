@@ -84,9 +84,9 @@ export class AppComponent implements OnInit, OnDestroy {
   sequentialThinkingStatus = signal<'enabled' | 'disabled' | 'checking' | 'error'>('disabled');
 
   // --- Computed Signals ---
-  selectedModelDetails = computed(() => this.allModels().find(m => m.id === this.config().selectedModelId));
-  canUploadImage = computed(() => this.modelCapabilities()[this.config().selectedModelId ?? '']?.includes('image') ?? false);
-  canUploadAudio = computed(() => this.modelCapabilities()[this.config().selectedModelId ?? '']?.includes('audio') ?? false);
+  selectedModelDetails = computed(() => this.allModels().find(m => m.id === this.selectedModelIdInput()));
+  canUploadImage = computed(() => this.modelCapabilities()[this.selectedModelIdInput() ?? '']?.includes('image') ?? false);
+  canUploadAudio = computed(() => this.modelCapabilities()[this.selectedModelIdInput() ?? '']?.includes('audio') ?? false);
 
   // --- Lifecycle ---
   private destroy$ = new Subject<void>();
@@ -205,7 +205,10 @@ export class AppComponent implements OnInit, OnDestroy {
       currentConfig.openRouterApiKey,
       currentConfig.selectedModelId,
       apiHistory,
-      { sequentialThinkingEnabled: currentConfig.sequentialThinkingEnabled } // Pass sequential thinking state
+      {
+        sequentialThinkingEnabled: currentConfig.sequentialThinkingEnabled, // Pass sequential thinking state
+        imageData: image // Pass uploaded image data
+      }
     ).pipe(
       takeUntil(this.destroy$),
       finalize(() => this.isLoading.set(false)),

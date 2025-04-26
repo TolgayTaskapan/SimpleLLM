@@ -10,6 +10,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import uvicorn
+import uuid # Import uuid for request ID generation
+
+class ChatMessage(BaseModel):
+    role: str
+    content: Any # Use Any to allow for both string and list content
 
 logging.basicConfig(level=logging.INFO)
 
@@ -88,14 +93,15 @@ async def invoke_sequential_thinking(params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 class ChatRequest(BaseModel):
-    prompt: str
-    apiKey: str = None
-    modelId: str = None
+    # Keep existing fields like prompt, apiKey, modelId, etc.
+    prompt: str # Keep prompt for potential use or ensure frontend sends last message here too
+    apiKey: Optional[str] = None
+    modelId: Optional[str] = None
     imageData: Optional[str] = None
-    # --- MCP Sequential Thinking Integration ---
     use_sequential_thinking: Optional[bool] = False
     sequential_thinking_params: Optional[Dict[str, Any]] = None
-    # --- End MCP Sequential Thinking Integration ---
+    # Add the history field:
+    messages: List[ChatMessage] # Add this line
 
 class PricingInfo(BaseModel):
     prompt: Optional[float] = None
@@ -150,23 +156,32 @@ async def chat_completion(request: ChatRequest):
             "Content-Type": "application/json"
         }
 
-        # Construct messages payload based on whether image data is present
-        if image_data:
-            messages_payload = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": user_prompt},
-                        {"type": "image_url", "image_url": {"url": image_data}}
-                    ]
-                }
-            ]
-        else:
-            messages_payload = [{"role": "user", "content": user_prompt}]
+        # Use the received messages list directly
+        messages_payload = request.messages
+
+        # If image data is present, add it to the last message in the history
+        if image_data and messages_payload:
+             # Ensure the last message is from the user and has content
+            last_message = messages_payload[-1]
+            if last_message.role == "user":
+                # Ensure content is a list
+                if not isinstance(last_message.content, list):
+                    last_message.content = [{"type": "text", "text": str(last_message.content)}]
+
+                # Add the image data as an image_url type
+                last_message.content.append({"type": "image_url", "image_url": {"url": image_data}})
+            else:
+                # If the last message is not from the user, create a new user message
+                logging.warning("Last message in history is not from user, adding new user message with image.")
+                new_user_message_content = [{"type": "text", "text": user_prompt}]
+                if image_data:
+                    new_user_message_content.append({"type": "image_url", "image_url": {"url": image_data}})
+                messages_payload.append({"role": "user", "content": new_user_message_content})
+
 
         payload = {
             "model": model_id,
-            "messages": messages_payload,
+            "messages": [msg.model_dump() if isinstance(msg, BaseModel) else msg for msg in messages_payload], # Convert ChatMessage models to dicts
             # Include other parameters like max_tokens, temperature if needed
         }
 
@@ -174,10 +189,23 @@ async def chat_completion(request: ChatRequest):
         response.raise_for_status() # Raise an exception for bad status codes
 
         response_data = response.json()
-        response_text = response_data['choices'][0]['message']['content']
+        
+        # Check if 'choices' exists and is not empty
+        if 'choices' in response_data and response_data['choices']:
+            response_text = response_data['choices'][0]['message']['content']
+            print(f"Generated response: {response_text}")
+            response_payload = {"response": response_text}
+        else:
+            # Log the full response data for debugging
+            logging.error(f"Downstream AI API returned unexpected response: {response_data}")
+            
+            # Attempt to extract error message if available
+            error_message = "Downstream AI API call failed or returned an unexpected response."
+            if 'error' in response_data and 'message' in response_data['error']:
+                error_message = f"Downstream AI API error: {response_data['error']['message']}"
+                
+            raise HTTPException(status_code=502, detail=error_message)
 
-        print(f"Generated response: {response_text}")
-        response_payload = {"response": response_text}
 
         # --- MCP Sequential Thinking Integration ---
         if thinking_output:

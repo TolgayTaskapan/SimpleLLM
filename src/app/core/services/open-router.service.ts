@@ -20,13 +20,42 @@ export class OpenRouterService {
   }
 
   sendChatCompletion(apiKey: string, modelId: string, messages: ChatMessage[], options?: any): Observable<any> {
+    // Process messages to ensure content is a string and extract latest prompt
+    let latestPrompt = '';
+    const processedMessages = messages.map(message => {
+      let contentString = '';
+      if (Array.isArray(message.content)) {
+        // Assuming content is an array of MessageContentPart
+        contentString = message.content
+          .filter(part => part.type === 'text')
+          .map(part => part.text)
+          .join('\n'); // Join text parts with newline
+      } else if (typeof message.content === 'string') {
+        contentString = message.content;
+      }
+
+      // If this is the last message (the user's current prompt), capture its text
+      if (message === messages[messages.length - 1] && message.role === 'user') {
+          latestPrompt = contentString;
+      }
+
+      return {
+        role: message.role,
+        content: contentString, // Ensure content is a string
+        // Keep other potential fields like thinking_steps if they exist on the message object
+        ...(message as any).thinking_steps && { thinking_steps: (message as any).thinking_steps }
+      };
+    });
+
     // The backend /chat endpoint expects a ChatRequest body
     const body = {
-      messages: messages, // Include the full conversation history
+      prompt: latestPrompt, // Add the missing prompt field
+      messages: processedMessages, // Include the processed conversation history
       apiKey: apiKey,
       modelId: modelId,
       use_sequential_thinking: options?.sequentialThinkingEnabled ?? false, // Pass sequential thinking state
-      sequential_thinking_params: options?.sequentialThinkingParams // Pass sequential thinking params if any
+      sequential_thinking_params: options?.sequentialThinkingParams, // Pass sequential thinking params if any
+      ...(options?.imageData && { imageData: options.imageData }) // Include imageData if present in options
     };
 
     // Call the backend endpoint for chat completion
